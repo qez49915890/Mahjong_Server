@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>線上台灣麻將</title>
+<script src="engine.js"></script>
+<style>
+:root{
+  --bg:#f4f1ea;
+  --fg:#222;
+  --card:#fff;
+  --bd:#d8d2c4;
+  --ac:#1d6b4a;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px)
+}
+@media(prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#15191a;--fg:#eee;--card:#20272a;--bd:#38434a;--ac:#4cc38a
+  }
+}
+:root[data-theme="dark"]{--bg:#15191a;--fg:#eee;--card:#20272a;--bd:#38434a;--ac:#4cc38a}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,"Noto Sans TC","PingFang TC",sans-serif}
+#app{max-width:760px;margin:0 auto;padding:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:10px}
+h1{font-size:22px;margin:8px 0}
+input[type="text"], input:not([type]){font:inherit;padding:8px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--fg);width:100%}
+button{font:inherit;padding:8px 14px;border-radius:8px;border:1px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer;margin:3px;transition:transform 0.1s, opacity 0.15s}
+button:active{transform:scale(0.97)}
+button.g{background:none;color:var(--fg);border-color:var(--bd)}
+button.x{background:#b3412f;border-color:#b3412f}
+button.demo{background:#d97706;border-color:#d97706;font-weight:600}
+.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.code{font-size:34px;letter-spacing:6px;font-weight:800;color:var(--ac)}
+.opp{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.pl{border:1px solid var(--bd);border-radius:10px;padding:6px;background:var(--card);font-size:13px;min-width:0;position:relative}
+.pl.on{border-color:var(--ac);box-shadow:0 0 0 2px var(--ac)}
+.felt{background:#1d5a3f;border-radius:12px;padding:10px;color:#fff;margin:8px 0;box-shadow:inset 0 2px 8px rgba(0,0,0,0.35)}
+.pool{display:flex;flex-wrap:wrap;min-height:38px;margin-bottom:4px}
+.pool b{font-size:12px;width:100%;font-weight:600;opacity:.9;margin-bottom:2px}
+.shout{display:inline-block;background:#ffd54a;color:#111;font-weight:800;font-size:12px;padding:1px 7px;border-radius:99px;margin-left:6px;animation:pop 0.25s ease}
+@keyframes pop{0%{transform:scale(0.6);opacity:0}80%{transform:scale(1.1)}100%{transform:scale(1);opacity:1}}
+
+/* ---------- 麻將牌面雪碧圖樣式 (9欄 x 5列) ---------- */
+.t{
+  display:inline-block;
+  width:36px;
+  height:48px;
+  border-radius:5px;
+  border:1px solid #999;
+  background-color:#fdfbf7;
+  background-image:var(--tile-img);
+  background-repeat:no-repeat;
+  background-size:900% 500%;
+  margin:1.5px;
+  box-shadow:0 2px 1px rgba(0,0,0,0.35);
+  vertical-align:middle;
+  user-select:none;
+  transition:transform 0.12s ease, box-shadow 0.12s ease;
+  flex-shrink:0;
+}
+.t.sm{
+  width:25px;
+  height:34px;
+  border-radius:4px;
+  margin:1px;
+  box-shadow:0 1px 1px rgba(0,0,0,0.3);
+}
+.t.hl{
+  outline:2.5px solid #ffd54a;
+  box-shadow:0 0 8px rgba(255,213,74,0.8);
+}
+.t.up{
+  transform:translateY(-10px);
+  box-shadow:0 6px 8px rgba(0,0,0,0.35);
+  outline:2px solid var(--ac);
+}
+.t.ag-self{
+  opacity:0.78;
+  outline:1.5px dashed #1d6b4a;
+}
+.hand{display:flex;flex-wrap:wrap;align-items:flex-end;min-height:62px;padding-top:10px}
+.hand .t{cursor:pointer}
+.hand .t:hover{filter:brightness(1.03)}
+.gap{width:20px;display:inline-block}
+.grp{display:inline-flex;margin-right:6px;padding:2px;background:rgba(0,0,0,.1);border-radius:6px}
+.mini{font-size:12px;opacity:.85}
+.res{border-color:var(--ac);border-width:2px}
+.atlas-box{margin-top:8px;padding-top:8px;border-top:1px dashed var(--bd)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const NM='東南西北', ZN='中發白';
+const TILE_NAMES = [
+  '一萬','二萬','三萬','四萬','五萬','六萬','七萬','八萬','九萬',
+  '一筒','二筒','三筒','四筒','五筒','六筒','七筒','八筒','九筒',
+  '一條','二條','三條','四條','五條','六條','七條','八條','九條',
+  '東風','南風','西風','北風','紅中','青發','白板',
+  '春','夏','秋','冬','梅','蘭','竹','菊'
+];
+
+/* ---------- 雪碧圖網格座標映射 [row(0~4), col(0~8)] ---------- */
+const tileMap = {
+  '-1': [3, 7],
+  '0': [2, 0], '1': [2, 1], '2': [2, 2], '3': [2, 3], '4': [2, 4], '5': [2, 5], '6': [2, 6], '7': [2, 7], '8': [2, 8],
+  '9': [0, 0], '10': [0, 1], '11': [0, 2], '12': [0, 3], '13': [0, 4], '14': [0, 5], '15': [0, 6], '16': [0, 7], '17': [0, 8],
+  '18': [1, 0], '19': [1, 1], '20': [1, 2], '21': [1, 3], '22': [1, 4], '23': [1, 5], '24': [1, 6], '25': [1, 7], '26': [1, 8],
+  '27': [3, 0], '28': [3, 1], '29': [3, 2], '30': [3, 3],
+  '31': [3, 4], '32': [3, 5], '33': [3, 6],
+  '34': [4, 0], '35': [4, 1], '36': [4, 2], '37': [4, 3],
+  '38': [4, 4], '39': [4, 5], '40': [4, 7], '41': [4, 6]
+};
+
+const h=(t,c,x,k)=>{
+  const e=document.createElement(t);
+  if(c)e.className=c;
+  if(x!=null)e.textContent=x;
+  (k||[]).forEach(y=>e.append(y));
+  return e;
+};
+const app=document.getElementById('app');
+
+/* 若前端放在 GitHub Pages，這裡填伺服器網址，例如 'wss://你的服務.onrender.com'；與伺服器同網址時留空 */
+const SERVER_URL='';
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
+const lsDel=k=>{try{localStorage.removeItem(k)}catch(e){}};
+let myP=lsGet('twmj-pid');
+if(!myP){myP='p'+Math.random().toString(36).slice(2)+Date.now().toString(36);lsSet('twmj-pid',myP)}
+let name=lsGet('twmj-name')||'',S=null,sel=null,msg='',connecting=false,offlineMode=false;
+let ws=null,room=null,sess=null,wantLeave=false,reconnecting=false,retries=0,retryT=null,pingT=null,connNote='';
+
+/* ---------- 內建 Canvas 麻將牌面繪製 ---------- */
+let spriteUrl = '';
+(function generateTileAtlas(){
+  const c = document.createElement('canvas');
+  c.width = 900; c.height = 650;
+  const ctx = c.getContext('2d');
+  const cw = 100, ch = 130;
+
+  const drawTileBase = (r, col, isBack=false) => {
+    const x = col*cw + 3, y = r*ch + 3, w = cw - 6, h = ch - 6;
+    ctx.fillStyle = isBack ? '#f59e0b' : '#fdfcf8';
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 12);
+    ctx.fill();
+    ctx.stroke();
+  };
+
+  const drawText = (r, col, topTxt, botTxt, topCol, botCol, big=false) => {
+    const cx = col*cw + cw/2, cy = r*ch + ch/2;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    if(big){
+      ctx.fillStyle = topCol;
+      ctx.font = 'bold 54px "Noto Serif TC", "KaiTi", serif';
+      ctx.fillText(topTxt, cx, cy);
+    } else {
+      ctx.fillStyle = topCol;
+      ctx.font = 'bold 40px "Noto Serif TC", "KaiTi", serif';
+      ctx.fillText(topTxt, cx, cy - 24);
+      ctx.fillStyle = botCol;
+      ctx.font = 'bold 40px "Noto Serif TC", "KaiTi", serif';
+      ctx.fillText(botTxt, cx, cy + 26);
+    }
+  };
+
+  const drawDot = (x, y, rad, color) => {
+    ctx.strokeStyle = color; ctx.fillStyle = color;
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, rad*0.45, 0, Math.PI*2); ctx.fill();
+  };
+
+  // 第 0 列：筒子 (一筒 ~ 九筒)
+  for(let col=0; col<9; col++){
+    drawTileBase(0, col);
+    const cx = col*cw+50, cy = 65, n = col+1;
+    if(n===1){ drawDot(cx, cy, 28, '#1e40af'); drawDot(cx, cy, 18, '#dc2626'); }
+    else if(n===2){ drawDot(cx, cy-26, 18, '#1e40af'); drawDot(cx, cy+26, 18, '#15803d'); }
+    else if(n===3){ drawDot(cx-22, cy-32, 14, '#1e40af'); drawDot(cx, cy, 14, '#dc2626'); drawDot(cx+22, cy+32, 14, '#15803d'); }
+    else if(n===4){ [[-20,-26,'#15803d'],[20,-26,'#1e40af'],[-20,26,'#1e40af'],[20,26,'#15803d']].forEach(p=>drawDot(cx+p[0],cy+p[1],14,p[2])); }
+    else if(n===5){ [[-22,-30,'#15803d'],[22,-30,'#1e40af'],[0,0,'#dc2626'],[-22,30,'#1e40af'],[22,30,'#15803d']].forEach(p=>drawDot(cx+p[0],cy+p[1],13,p[2])); }
+    else if(n===6){ [[-18,-32,'#15803d'],[18,-32,'#15803d'],[-18,4,'#dc2626'],[18,4,'#dc2626'],[-18,34,'#dc2626'],[18,34,'#dc2626']].forEach(p=>drawDot(cx+p[0],cy+p[1],12,p[2])); }
+    else if(n===7){ [[-22,-38,'#15803d'],[0,-28,'#15803d'],[22,-18,'#15803d'],[-18,12,'#dc2626'],[18,12,'#dc2626'],[-18,38,'#dc2626'],[18,38,'#dc2626']].forEach(p=>drawDot(cx+p[0],cy+p[1],11,p[2])); }
+    else if(n===8){ for(let r=0;r<4;r++)for(let k=0;k<2;k++)drawDot(cx+(k?18:-18), cy-36+r*24, 10, '#1e40af'); }
+    else if(n===9){ for(let r=0;r<3;r++)for(let k=0;k<3;k++)drawDot(cx+(k-1)*24, cy+(r-1)*28, 10, r===0?'#1e40af':r===1?'#dc2626':'#15803d'); }
+  }
+
+  // 第 1 列：條子 (一條 ~ 九條)
+  const drawStick = (x, y, h, color) => {
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.roundRect(x-5, y-h/2, 10, h, 4); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillRect(x-2, y-2, 4, 4);
+  };
+  for(let col=0; col<9; col++){
+    drawTileBase(1, col);
+    const cx = col*cw+50, cy = ch+65, n = col+1;
+    if(n===1){ drawText(1, col, '🀐', '', '#15803d', '', true); }
+    else if(n===2){ drawStick(cx, cy-22, 34, '#15803d'); drawStick(cx, cy+22, 34, '#15803d'); }
+    else if(n===3){ drawStick(cx, cy-22, 34, '#15803d'); drawStick(cx-18, cy+22, 34, '#15803d'); drawStick(cx+18, cy+22, 34, '#15803d'); }
+    else if(n===4){ [[-16,-22],[16,-22],[-16,22],[16,22]].forEach(p=>drawStick(cx+p[0],cy+p[1],34,'#15803d')); }
+    else if(n===5){ [[-22,-22,'#15803d'],[22,-22,'#15803d'],[0,0,'#dc2626'],[-22,22,'#15803d'],[22,22,'#15803d']].forEach(p=>drawStick(cx+p[0],cy+p[1],32,p[2])); }
+    else if(n===6){ [[-20,-22],[0,-22],[20,-22],[-20,22],[0,22],[20,22]].forEach(p=>drawStick(cx+p[0],cy+p[1],32,'#15803d')); }
+    else if(n===7){ drawStick(cx, cy-32, 24, '#dc2626'); [[-20,0,'#15803d'],[0,0,'#1e40af'],[20,0,'#15803d'],[-20,30,'#15803d'],[0,30,'#1e40af'],[20,30,'#15803d']].forEach(p=>drawStick(cx+p[0],cy+p[1],24,p[2])); }
+    else if(n===8){
+      // 八條：上下對稱 W 與 M 竹節紋
+      const draw8Part = (pts) => {
+        ctx.strokeStyle = '#3d8b6b';
+        ctx.lineWidth = 11.5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        pts.forEach((p, idx) => idx === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1]));
+        ctx.stroke();
+
+        ctx.fillStyle = '#3d8b6b';
+        pts.forEach((p, idx) => {
+          if (idx < pts.length - 1) {
+            const p2 = pts[idx + 1];
+            [0.32, 0.68].forEach(t => {
+              const mx = p[0] + (p2[0] - p[0]) * t;
+              const my = p[1] + (p2[1] - p[1]) * t;
+              ctx.beginPath();
+              ctx.arc(mx, my, 5.2, 0, Math.PI * 2);
+              ctx.fill();
+            });
+          }
+        });
+
+        ctx.strokeStyle = '#fdfcf8';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        pts.forEach((p, idx) => idx === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1]));
+        ctx.stroke();
+      };
+
+      draw8Part([
+        [cx - 24, cy - 39],
+        [cx - 24, cy - 11],
+        [cx,      cy - 29],
+        [cx + 24, cy - 11],
+        [cx + 24, cy - 39]
+      ]);
+
+      draw8Part([
+        [cx - 24, cy + 39],
+        [cx - 24, cy + 11],
+        [cx,      cy + 29],
+        [cx + 24, cy + 11],
+        [cx + 24, cy + 39]
+      ]);
+    }
+    else if(n===9){ for(let r=0;r<3;r++)for(let k=0;k<3;k++)drawStick(cx+(k-1)*22, cy+(r-1)*30, 24, k===1?'#dc2626':'#15803d'); }
+  }
+
+  // 第 2 列：萬子 (一萬 ~ 九萬)
+  const wanNums = ['一','二','三','四','五','六','七','八','九'];
+  wanNums.forEach((w, col) => { drawTileBase(2, col); drawText(2, col, w, '萬', '#1e3a8a', '#dc2626'); });
+
+  // 第 3 列：風牌、三元牌、牌背
+  ['東','南','西','北'].forEach((w, col) => { drawTileBase(3, col); drawText(3, col, w, '', '#1e3a8a', '', true); });
+  drawTileBase(3, 4); drawText(3, 4, '中', '', '#dc2626', '', true);
+  drawTileBase(3, 5); drawText(3, 5, '發', '', '#15803d', '', true);
+  drawTileBase(3, 6);
+  ctx.strokeStyle = '#1e3a8a'; ctx.lineWidth = 4; ctx.strokeRect(6*cw+22, 3*ch+22, cw-44, ch-44);
+  drawTileBase(3, 7, true);
+  drawTileBase(3, 8, true);
+
+  // 第 4 列：花牌
+  const fls = [['1','春','#15803d','#dc2626'],['2','夏','#15803d','#dc2626'],['3','秋','#15803d','#dc2626'],['4','冬','#15803d','#dc2626'],
+               ['梅','1','#1e3a8a','#dc2626'],['蘭','2','#1e3a8a','#dc2626'],['菊','3','#1e3a8a','#dc2626'],['竹','4','#1e3a8a','#dc2626']];
+  fls.forEach((f, col) => { drawTileBase(4, col); drawText(4, col, f[0], f[1], f[2], f[3]); });
+  drawTileBase(4, 8, true);
+
+  spriteUrl = c.toDataURL('image/png');
+  document.documentElement.style.setProperty('--tile-img', `url('${spriteUrl}')`);
+})();
+
+const urlParams = new URLSearchParams(window.location.search);
+let presetCode = (urlParams.get('room') || '').trim().toUpperCase().slice(0, 5);
+
+function send(a,o){
+  const data=Object.assign({a},o||{});
+  if(offlineMode){ if(room)room.act(myP,data); }
+  else if(ws&&ws.readyState===1) ws.send(JSON.stringify({type:'act',data}));
+}
+
+function copyInviteLink(roomCode, btnEl){
+  const url = new URL(window.location.href);
+  url.searchParams.set('room', roomCode);
+  const shareUrl = url.toString();
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(shareUrl).then(()=>{
+      const old = btnEl.textContent;
+      btnEl.textContent = '✅ 已複製邀請連結！';
+      setTimeout(()=>{ btnEl.textContent = old; }, 2000);
+    }).catch(()=>fallbackCopy(shareUrl, btnEl));
+  }else{
+    fallbackCopy(shareUrl, btnEl);
+  }
+}
+
+function fallbackCopy(text, btnEl){
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try{
+    document.execCommand('copy');
+    const old = btnEl.textContent;
+    btnEl.textContent = '✅ 已複製邀請連結！';
+    setTimeout(()=>{ btnEl.textContent = old; }, 2000);
+  }catch(e){
+    prompt('請手動複製以下邀請連結傳給朋友：', text);
+  }
+  document.body.removeChild(ta);
+}
+
+/* ---------- 單機快速試玩（在瀏覽器內執行，不需要伺服器） ---------- */
+function startQuickDemo(){
+  name=(document.getElementById('nm')?.value||'').trim().slice(0,8)||'玩家';
+  lsSet('twmj-name',name);
+  offlineMode=true; msg='';
+  room=MJ.createRoom('DEMO1');
+  room.onChange=()=>{S=room.stateFor(myP);render()};
+  room.initDemo(myP,name);
+}
+
+/* ---------- WebSocket 連線（斷線自動重連） ---------- */
+function wsUrl(){
+  if(SERVER_URL)return SERVER_URL;
+  return (location.protocol==='https:'?'wss://':'ws://')+location.host;
+}
+
+function enter(c, asCreate){
+  name=(document.getElementById('nm')?.value||'').trim().slice(0,8)||'玩家';
+  lsSet('twmj-name',name);
+  sess={room:c,n:name,create:asCreate};
+  msg='';connecting=true;offlineMode=false;retries=0;wantLeave=false;
+  connNote='正在連線…（免費主機休眠後喚醒約需 1 分鐘，請稍候）';
+  render();
+  openWs();
+}
+
+function openWs(){
+  clearTimeout(retryT);
+  if(ws){ try{ws.onclose=null;ws.close()}catch(e){} }
+  let sock;
+  try{ sock=new WebSocket(wsUrl()) }catch(e){ return scheduleRetry() }
+  ws=sock;
+  sock.onopen=()=>{
+    sock.send(JSON.stringify({type:sess.create?'create':'join',room:sess.room,pid:myP,n:sess.n}));
+    clearInterval(pingT);
+    pingT=setInterval(()=>{ if(sock.readyState===1)sock.send('{"type":"ping"}') },20000);
+  };
+  sock.onmessage=ev=>{
+    let m;try{m=JSON.parse(ev.data)}catch(e){return}
+    if(m.type==='st'){
+      S=m.data;connecting=false;reconnecting=false;retries=0;
+      if(sess&&sess.create){sess.create=false}
+      if(sess)lsSet('twmj-session',JSON.stringify({room:sess.room,n:sess.n}));
+      const u=new URL(location.href);u.searchParams.set('room',sess.room);history.replaceState({},'',u);
+      render();
+    }else if(m.type==='err'){
+      msg=m.msg||'連線失敗。';
+      leave(true);
+    }
+  };
+  sock.onclose=()=>{ if(sock!==ws)return; clearInterval(pingT); if(!wantLeave)scheduleRetry() };
+  sock.onerror=()=>{};
+}
+
+function scheduleRetry(){
+  if(wantLeave||!sess)return;
+  retries++;
+  if(!S&&retries>40){ msg='無法連上伺服器，請稍後再試。'; return leave(true); }
+  if(S&&!reconnecting){reconnecting=true;render()}
+  clearTimeout(retryT);
+  retryT=setTimeout(openWs,Math.min(1000*retries,4000));
+}
+
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&sess&&!wantLeave&&!offlineMode&&(!ws||ws.readyState>1)){ retries=0; openWs(); }
+});
+
+function leave(keepMsg){
+  wantLeave=true; clearTimeout(retryT); clearInterval(pingT);
+  if(ws){ try{ws.onclose=null;ws.close()}catch(e){} ws=null }
+  if(room){ room.destroy(); room=null }
+  sess=null; S=null; connecting=false; offlineMode=false; reconnecting=false;
+  lsDel('twmj-session');
+  const u=new URL(location.href);u.searchParams.delete('room');history.replaceState({},'',u);
+  if(!keepMsg)msg='';
+  render();
+}
+
+const mySeat=()=>S?S.me:-1;
+
+/* ---------- 麻將牌面圖片渲染元件 ---------- */
+function tl(t){
+  return [TILE_NAMES[t] || '牌背'];
+}
+
+function tz(t, c=''){
+  const pos = tileMap[String(t)] || tileMap['-1'];
+  const [row, col] = pos;
+  const el = h('span', ('t ' + c).trim());
+  const posX = (col / 8) * 100;
+  const posY = (row / 4) * 100;
+  el.style.backgroundPosition = `${posX}% ${posY}%`;
+  el.title = t === -1 ? '暗牌' : (TILE_NAMES[t] || '牌背');
+  return el;
+}
+
+/* ---------- 大廳與全牌面圖鑑預覽 ---------- */
+function draw0(){
+  const nmInput = h('input'); nmInput.id='nm'; nmInput.maxLength=8; nmInput.placeholder='例如：小明'; nmInput.value=name;
+  const cdInput = h('input'); cdInput.id='cd'; cdInput.maxLength=5; cdInput.placeholder='輸入 5 碼邀請碼'; cdInput.style.textTransform='uppercase';
+  if(presetCode){ cdInput.value = presetCode; }
+
+  const demoCard = h('div','card',null,[
+    h('div','row',null,[
+      btn('⚡ 單機快速試玩（立即預覽麻將牌面）', ()=>startQuickDemo(), 'demo')
+    ]),
+    h('div','mini','免等待連線，立即開啟牌桌與 3 位智慧人機對戰。')
+  ]);
+
+  const joinCard = h('div','card',null,[
+    h('div','mini', presetCode ? '🎯 已透過邀請連結自動帶入房間代碼：' : '已有邀請碼（多人連線）'),
+    cdInput,
+    h('div','row',null,[
+      btn(presetCode ? '立即加入房間 (' + presetCode + ')' : '加入房間', ()=>{
+        const c=document.getElementById('cd').value.trim().toUpperCase();
+        if(c.length===5)enter(c,false);
+      }, presetCode ? '' : 'g')
+    ])
+  ]);
+
+  const createCard = h('div','card',null,[
+    h('div','mini','建立新牌局（多人連線）'),
+    h('div','row',null,[
+      btn('建立房間',()=>enter(Array.from({length:5},()=>'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.random()*32|0]).join(''),true), presetCode ? 'g' : '')
+    ])
+  ]);
+
+  const nameCard = h('div','card',null,[
+    h('div','mini','玩家暱稱'),
+    nmInput
+  ]);
+
+  const atlasPreview = h('div','card',null,[
+    h('b',0,'🀄 麻將牌面預覽（全部 42 張 + 牌背）'),
+    h('div','mini','以下為內建繪製出的每一張牌面：'),
+    h('div','atlas-box',null,[
+      h('div','mini','筒子（一筒～九筒）：'),
+      h('div','row',null,[9,10,11,12,13,14,15,16,17].map(t=>tz(t))),
+      h('div','mini','條子（一條～九條）：'),
+      h('div','row',null,[18,19,20,21,22,23,24,25,26].map(t=>tz(t))),
+      h('div','mini','萬子（一萬～九萬）：'),
+      h('div','row',null,[0,1,2,3,4,5,6,7,8].map(t=>tz(t))),
+      h('div','mini','風牌、三元牌與牌背：'),
+      h('div','row',null,[27,28,29,30,31,32,33,-1].map(t=>tz(t))),
+      h('div','mini','花牌（春夏秋冬、梅蘭竹菊）：'),
+      h('div','row',null,[34,35,36,37,38,39,40,41].map(t=>tz(t)))
+    ])
+  ]);
+
+  app.replaceChildren(
+    h('h1',0,'🀄 線上台灣麻將'),
+    demoCard,
+    nameCard,
+    ...(presetCode ? [joinCard, createCard] : [createCard, joinCard]),
+    atlasPreview,
+    h('div','mini',msg||'')
+  );
+}
+
+function btn(t,f,c){const b=h('button',c||'',t);b.onclick=()=>f(b);return b}
+
+function render(){
+  if(!S){
+    if(connecting)return app.replaceChildren(h('div','card',connNote||'正在連線…'), btn('取消',()=>leave(false),'g'));
+    return draw0();
+  }
+  const me=mySeat();
+  if(me<0) return app.replaceChildren(h('div','card','房間已滿或遊戲已經開始，無法加入。'), btn('返回大廳',()=>leave(false),'g'));
+  S.ph==='lobby'?lobby(me):table(me);
+}
+
+const banner=()=>reconnecting&&!offlineMode?h('div','card','⚠️ 連線中斷，重新連線中…（這段時間由電腦代打，回來會自動接手）'):null;
+
+function lobby(me){
+  const rows=S.seats.map((x,i)=>h('div','pl',(NM[i])+'位 '+(x?x.n+(x.b?'（人機）':i===me?'（你）':x.off?'（離線）':''):'空位')));
+  const copyBtn = btn('📋 一鍵複製邀請連結', (b)=>copyInviteLink(S.code, b));
+  app.replaceChildren(
+    ...[banner()].filter(Boolean),
+    h('h1',0,'房間'),
+    h('div','card',null,[
+      h('div','mini','邀請碼（或直接複製下方連結傳給朋友）'),
+      h('div','row',null,[h('div','code',S.code), copyBtn])
+    ]),
+    h('div','card',null,rows),
+    me===0?h('div','row',null,[btn('加入人機',()=>send('bot'),'g'),btn('開始遊戲（空位自動補人機）',()=>send('start'))]):h('div','mini','等待房主開始…'),
+    btn('離開',()=>leave(false),'g')
+  );
+}
+
+/* ---------- 副露區渲染（暗槓對他人隱藏） ---------- */
+function grp(ms, c, isOwner=false){
+  return ms.map(m => {
+    const isAg = m.k === 'ag';
+    const showFace = isOwner || (S && S.ph === 'end') || !isAg;
+    const tiles = showFace ? m.ts : [-1, -1, -1, -1];
+    const extraCls = (isAg && isOwner && S && S.ph !== 'end') ? ' ag-self' : '';
+    const grpEl = h('span', 'grp', null, tiles.map(t => tz(t, c + extraCls)));
+    if (isAg && !showFace) grpEl.title = '暗槓（蓋牌隱藏）';
+    else if (isAg && isOwner) grpEl.title = '你的暗槓（僅自己可見）';
+    return grpEl;
+  });
+}
+
+function card(i,me){
+  const x=S.seats[i],w=NM[(i-S.dealer+4)%4];
+  const titleRow = h('div',0,x.n+(i===S.dealer?' 莊':'')+(x.b?' 🤖':'')+(x.off?' 💤託管中':''));
+  if(S.shout && S.shout.s === i){
+    titleRow.append(h('span','shout',S.shout.text));
+  }
+  return h('div','pl'+(S.ph==='play'&&S.turn===i?' on':''),null,[
+    titleRow,
+    h('div','mini',w+'家 '+S.sc[i]+'分 手牌'+(S.cnt[i]||0)+'張'),
+    h('div','hand',null,[...grp(S.mel[i],'sm', i===me),...S.fl[i].map(t=>tz(t,'sm'))])
+  ]);
+}
+
+function winHand(r,c){
+  const hd=(S.H[r.w]||[]).slice().sort((a,b)=>a-b),i=hd.indexOf(r.wt);
+  if(i>=0)hd.splice(i,1);
+  return [...hd.map(t=>tz(t,c)),h('span','gap'),tz(r.wt,c+' wintile')];
+}
+
+function table(me){
+  const o=[1,2,3].map(k=>(me+k)%4),
+  pool=i=>h('div','pool',null,[
+    h('b',0,S.seats[i].n+' 的牌河'),
+    ...S.disc[i].map((t,j)=>tz(t,'sm'+(S.last&&S.last.f===i&&S.last.t===t&&j===S.disc[i].length-1?' hl':'')))
+  ]);
+  const hd=(S.H[me]||[]).slice(),turnMe=S.ph==='play'&&S.mode==='d'&&S.turn===me,opt=S.O[me]||{};
+  let main=hd,last=null;
+  if(turnMe&&S.drew){last=hd[hd.length-1];main=hd.slice(0,-1).sort((a,b)=>a-b)}
+  else main=hd.slice().sort((a,b)=>a-b);
+
+  const hs=[];
+  const mk=(t,k)=>{
+    const e=tz(t,sel===k?'up':'');
+    e.onclick=()=>{
+      if(!turnMe)return;
+      if(sel===k){sel=null;send('disc',{t})}
+      else{sel=k;render()}
+    };
+    return e;
+  };
+  const iWon=S.ph==='end'&&S.res&&!S.res.draw&&S.res.w===me&&S.res.wt!=null;
+  if(iWon){
+    const wi=main.indexOf(S.res.wt);
+    if(wi>=0)main.splice(wi,1);
+    last=S.res.wt;
+  }
+  main.forEach((t,i)=>hs.push(mk(t,'m'+i)));
+  if(last!=null){hs.push(h('span','gap'));hs.push(mk(last,'L'))}
+
+  const st=S.ph==='end'?'本局結束':S.mode==='d'?'輪到 '+S.seats[S.turn].n+' 打牌':S.mode==='bg_c'?'等待搶槓宣告…':'等待宣告：'+(S.wait.length?S.wait.map(i=>S.seats[i].n).join('、'):'…');
+  const acts=[];
+  if(S.ph==='play'&&(S.mode==='c'||S.mode==='bg_c')&&S.wait.includes(me)){
+    const q=S.O[me]||{};
+    if(q.hu)acts.push(btn(S.mode==='bg_c'?'搶槓胡':'胡',()=>send('hu'),'x'));
+    if(S.mode==='c'){
+      if(q.gang)acts.push(btn('槓',()=>send('gang')));
+      if(q.pon)acts.push(btn('碰',()=>send('pon')));
+      (q.chi||[]).forEach((c,i)=>acts.push(btn('吃 '+c.map(t=>tl(t).join('')).join(' '),()=>send('chi',{i}))));
+    }
+    acts.push(btn('過',()=>send('pass'),'g'));
+  }
+  if(turnMe){
+    if(opt.hu)acts.push(btn('自摸',()=>send('hu'),'x'));
+    (opt.ag||[]).forEach(t=>acts.push(btn('暗槓 '+tl(t).join(''),()=>send('ag',{t}))));
+    (opt.bg||[]).forEach(t=>acts.push(btn('加槓 '+tl(t).join(''),()=>send('bg',{t}))));
+  }
+
+  const kids=[
+    ...[banner()].filter(Boolean),
+    h('div','row',null,[
+      h('span','mini',(offlineMode?'單機試玩模式':'邀請碼 '+S.code)+' 剩牌 '+S.wl+' '+NM[0]+'圈 連莊 '+S.streak),
+      btn('離開',()=>leave(false),'g')
+    ]),
+    h('div','opp',null,o.map(i=>card(i,me))),
+    h('div','felt',null,[pool(o[1]),pool(o[0]),pool(o[2]),pool(me)]),
+    h('div','mini',st)
+  ];
+
+  if(S.ph==='end'){
+    const r=S.res;
+    kids.push(h('div','card res',null,r.draw?[h('b',0,'流局，莊家連莊')]:[
+      h('b',0,S.seats[r.w].n+(r.zm?' 自摸！':r.extra==='rob'?' 搶槓胡！（'+S.seats[r.f].n+' 被搶槓）':' 胡牌！（'+S.seats[r.f].n+' 放槍）')),
+      h('div',0,r.L.join('、')||'無台'),
+      h('div',0,'共 '+r.tai+' 台，每家賠 '+r.a+' 分'),
+      h('div','hand',null,[...grp(S.mel[r.w]||[],'sm',true),...S.fl[r.w].map(t=>tz(t,'sm')),...winHand(r,'sm')])
+    ]));
+    kids.push(btn('下一局',()=>send('next')));
+  }
+
+  kids.push(h('div','card',null,[
+    h('div','row',null,[
+      h('b',0,S.seats[me].n+'（你）'+NM[(me-S.dealer+4)%4]+'家 '+S.sc[me]+'分'),
+      ...S.fl[me].map(t=>tz(t,'sm'))
+    ]),
+    h('div','hand',null,[...grp(S.mel[me],'',true),...hs]),
+    h('div','row',null,acts),
+    turnMe?h('div','mini','點一張牌選取（牌會浮起），再點一次打出'):null
+  ].filter(Boolean)));
+
+  app.replaceChildren(...kids);
+}
+
+(function boot(){
+  let ses=null;try{ses=JSON.parse(lsGet('twmj-session')||'null')}catch(e){}
+  if(ses&&ses.room&&(!presetCode||presetCode===ses.room)){
+    name=ses.n||name;
+    sess={room:ses.room,n:name,create:false};
+    connecting=true;connNote='正在回到牌桌…（免費主機休眠後喚醒約需 1 分鐘）';
+    render();openWs();
+  }else draw0();
+})();
+</script>
+</body>
+</html>
