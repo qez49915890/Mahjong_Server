@@ -22,6 +22,12 @@ function createRoom(code){
   const room={code,onChange:null,lastActive:Date.now()};
   const isAuto=s=>{const x=G.seats[s];return !!(x&&(x.b||x.off))};
   const seatOf=p=>G.seats.findIndex(x=>x&&x.p===p);
+  // 吃牌後的食替限制：剛吃的那張牌，這回合不能打出（手上只剩這種牌時例外）
+  const banned=s=>{
+    const n=G.noDisc;
+    if(!n||n.s!==s||G.mode!=='d'||G.turn!==s)return -1;
+    return G.hands[s].some(x=>x!==n.t)?n.t:-1;
+  };
 
 function tally(s,zm,extra){
   const hd=G.hands[s],ms=G.mel[s],w=(s-G.dealer+4)%4;let tai=0;const L=[],A=(n,x)=>{tai+=x;L.push(n+x+'台')};
@@ -137,7 +143,7 @@ function stateFor(pid){
   }));
   return{ph:G.ph,code,me,seats:G.seats.map(x=>x&&{n:x.n,b:x.b?1:0,off:x.off?1:0}),sc:G.sc,dealer:G.dealer,
     streak:G.streak,turn:G.turn,mode:G.mode,drew:G.drew,wl:b?0:G.wall.length,disc:G.disc,mel,fl:G.fl,
-    cnt:b?[]:G.hands.map(x=>x.length),last:G.last,wait:G.wait,res:G.res,shout:G.shout,H,O};
+    nd:me>=0?banned(me):-1,cnt:b?[]:G.hands.map(x=>x.length),last:G.last,wait:G.wait,res:G.res,shout:G.shout,H,O};
 }
 
 function bc(){ room.lastActive=Date.now(); if(!destroyed&&room.onChange)room.onChange(); }
@@ -165,7 +171,7 @@ function newRound(){
   for(let i=w.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[w[i],w[j]]=[w[j],w[i]]}
   Object.assign(G,{
     wall:w,hands:[[],[],[],[]],mel:[[],[],[],[]],fl:[[],[],[],[]],disc:[[],[],[],[]],
-    last:null,res:null,wait:[],opts:{},claims:{},drew:false,fromGang:false,pendingBg:null,shout:null,
+    last:null,noDisc:null,res:null,wait:[],opts:{},claims:{},drew:false,fromGang:false,pendingBg:null,shout:null,
     passedHu:[false,false,false,false]
   });
   for(let r=0;r<16;r++)for(let s=0;s<4;s++)G.hands[s].push(G.wall.pop());
@@ -230,12 +236,14 @@ function bot(s){
     if(ponMeld) return initiateBg(s, ponMeld.ts[0]);
   }
   // 4. 捨牌判斷：評估打出每張牌後剩餘手牌的進張價值，保留最高分的手牌組合
-  let bestTile = hd[0];
+  const bn=banned(s);
+  let bestTile = hd.find(x=>x!==bn);
+  if(bestTile==null)bestTile=hd[0];
   let bestRemainScore = -1e9;
   const seen = new Set();
   for(let i = 0; i < hd.length; i++){
     const t = hd[i];
-    if(seen.has(t)) continue;
+    if(seen.has(t)||t===bn) continue;
     seen.add(t);
     const remain = hd.slice();
     remain.splice(i, 1);
@@ -251,6 +259,8 @@ function bot(s){
 
 function disc(s,t){
   const hd=G.hands[s],i=hd.indexOf(t);if(i<0)return;
+  if(banned(s)===t)return;
+  G.noDisc=null;
   hd.splice(i,1);hd.sort((a,b)=>a-b);
   G.passedHu[s]=false;
   G.disc[s].push(t);G.last={t,f:s};G.mode='c';G.tk++;G.drew=false;G.fromGang=false;G.opts={};G.claims={};G.wait=[];
@@ -317,6 +327,7 @@ function resolve(){
   }
   const rm=ts.slice();rm.splice(rm.indexOf(t),1);rm.forEach(v=>hd.splice(hd.indexOf(v),1));
   G.mel[s].push({k,ts});G.turn=s;G.mode='d';G.last=null;
+  G.noDisc=k==='chi'?{s,t}:null;
   G.passedHu[s]=false;
   if(k==='gang'){hd.push(pull(s));G.drew=true;G.fromGang=true}else{G.drew=false;G.fromGang=false}
   hd.sort((a,b)=>a-b);if(k==='gang')hd.push(hd.splice(hd.length-1,1)[0]);
