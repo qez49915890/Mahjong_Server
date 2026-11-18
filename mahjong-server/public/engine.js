@@ -17,6 +17,7 @@ function win(a,pg=1,cg=1,pf=()=>1){
 
 /* ---------- 計分設定：底 100、台 20（得分 = 底 + 台 x 台數） ---------- */
 const BASE=100, PER=20;
+const TURN_MS=30000, CLAIM_MS=20000, BG_MS=10000;   // 出牌、吃碰胡宣告、搶槓宣告的思考時間（超時自動處理）
 // 各項台數（想調整某一項，改這裡的數字即可，網頁上的台數表會自動跟著變）
 const T={zimo:1,menqing:1,buqiu:1,banqiu:1,quanqiu:2,dudiao:1,
   qianggang:1,gangkai:1,haidi:1,hedi:1,
@@ -222,13 +223,16 @@ function stateFor(pid){
         ag:G.drew&&G.wall.length>16?[...new Set(hd.filter(t=>c[t]===4))]:[],bg:bgList};
     }
   }
+  // 只有「現在輪到你操作」的人才收到倒數時間，其他人看不出誰在思考
+  const mine=G.ph==='play'&&me>=0&&((G.mode==='d'&&G.turn===me&&!isAuto(me))||G.wait.includes(me));
+  const tl=mine&&G.dl?Math.max(0,G.dl-Date.now()):-1;
   const mel=G.mel.map((ms,idx)=>ms.map(m=>{
     if(m.k==='ag'&&G.ph!=='end'&&idx!==me)return{k:'ag',ts:[-1,-1,-1,-1]};
     return m;
   }));
   return{ph:G.ph,code,me,seats:G.seats.map(x=>x&&{n:x.n,b:x.b?1:0,off:x.off?1:0}),sc:G.sc,dealer:G.dealer,
     streak:G.streak,turn:G.turn,mode:G.mode,drew:G.drew,wl:b?0:G.wall.length,disc:G.disc,mel,fl:G.fl,
-    nd:me>=0?banned(me):-1,cnt:b?[]:G.hands.map(x=>x.length),last:G.last,wait:G.wait,res:G.res,shout:G.shout,H,O};
+    nd:me>=0?banned(me):-1,cnt:b?[]:G.hands.map(x=>x.length),last:G.last,wait:G.wait.includes(me)?[me]:[],tl,res:G.res,shout:G.shout,H,O};
 }
 
 function bc(){ room.lastActive=Date.now(); if(!destroyed&&room.onChange)room.onChange(); }
@@ -289,13 +293,14 @@ function draw(s, isFromGang=false){
 }
 
 function sync(){
+  G.dl=(G.ph==='play'&&G.mode==='d'&&!isAuto(G.turn))?Date.now()+TURN_MS:0;
   bc();
   if(G.ph!=='play'||G.mode!=='d')return;
   const s=G.turn,k=++G.tk;
   // 模擬真人思考時間（650ms ~ 1150ms）
   const delay = 650 + Math.floor(Math.random() * 500);
   if(isAuto(s))setTimeout(()=>{if(k===G.tk&&!destroyed)bot(s)}, delay);
-  else setTimeout(()=>{if(k===G.tk&&!destroyed&&G.ph==='play'&&G.mode==='d'&&G.turn===s)bot(s)}, 60000); // 真人閒置 60 秒自動代打
+  else setTimeout(()=>{if(k===G.tk&&!destroyed&&G.ph==='play'&&G.mode==='d'&&G.turn===s)bot(s)}, TURN_MS); // 真人閒置超時自動代打
 }
 
 function bot(s){
@@ -373,6 +378,7 @@ function disc(s,t){
       }
     }
   }
+  G.dl=G.wait.length?Date.now()+CLAIM_MS:0;
   bc();
   if(!G.wait.length){
     // 若人機要吃/碰/槓/胡，稍微停頓 700ms 模擬真人反應喊牌
@@ -384,7 +390,7 @@ function disc(s,t){
         G.claims[x]='pass';
       });
       G.wait=[];resolve();
-    },12000);
+    },CLAIM_MS);
   }
 }
 
@@ -448,12 +454,13 @@ function initiateBg(s, t){
       else G.wait.push(x);
     }
   }
+  G.dl=G.wait.length?Date.now()+BG_MS:0;
   bc();
   if(!G.wait.length) setTimeout(resolveBg, 450);
   else timer=setTimeout(()=>{
     G.wait.forEach(x=>{G.passedHu[x]=true; G.claims[x]='pass';});
     G.wait=[]; resolveBg();
-  }, 10000);
+  }, BG_MS);
 }
 
 function resolveBg(){
@@ -489,7 +496,7 @@ function resolveBg(){
 }
 
 function fin(w,zm,extra){
-  G.ph='end';G.tk++;clearTimeout(timer);G.wait=[];
+  G.ph='end';G.tk++;clearTimeout(timer);G.wait=[];G.dl=0;
   if(w==null)G.res={draw:1};
   else{
     let f=-1,wt;

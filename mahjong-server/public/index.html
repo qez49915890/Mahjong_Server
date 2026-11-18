@@ -86,6 +86,9 @@ button.demo{background:#d97706;border-color:#d97706;font-weight:600}
 .hand{display:flex;flex-wrap:wrap;align-items:flex-end;min-height:62px;padding-top:10px}
 .hand .t{cursor:pointer}
 .hand .t:hover{filter:brightness(1.03)}
+.cd{text-align:center;font-size:18px;padding:6px 10px;border:2px solid var(--ac);border-radius:12px}
+.cd b{font-size:22px}
+.cd.low{color:#ef4444;border-color:#ef4444}
 .t.dim{opacity:.35;filter:grayscale(.6)}
 .gap{width:20px;display:inline-block}
 .grp{display:inline-flex;margin-right:6px;padding:2px;background:rgba(0,0,0,.1);border-radius:6px}
@@ -135,7 +138,7 @@ const lsDel=k=>{try{localStorage.removeItem(k)}catch(e){}};
 let myP=lsGet('twmj-pid');
 if(!myP){myP='p'+Math.random().toString(36).slice(2)+Date.now().toString(36);lsSet('twmj-pid',myP)}
 let name=lsGet('twmj-name')||'',S=null,sel=null,msg='',connecting=false,offlineMode=false;
-let ws=null,room=null,sess=null,wantLeave=false,reconnecting=false,retries=0,retryT=null,pingT=null,connNote='';
+let recvAt=0,ws=null,room=null,sess=null,wantLeave=false,reconnecting=false,retries=0,retryT=null,pingT=null,connNote='';
 
 /* ---------- 內建 Canvas 麻將牌面繪製 ---------- */
 let spriteUrl = '';
@@ -334,7 +337,7 @@ function startQuickDemo(){
   lsSet('twmj-name',name);
   offlineMode=true; msg='';
   room=MJ.createRoom('DEMO1');
-  room.onChange=()=>{S=room.stateFor(myP);render()};
+  room.onChange=()=>{S=room.stateFor(myP);recvAt=Date.now();render()};
   room.initDemo(myP,name);
 }
 
@@ -368,7 +371,7 @@ function openWs(){
   sock.onmessage=ev=>{
     let m;try{m=JSON.parse(ev.data)}catch(e){return}
     if(m.type==='st'){
-      S=m.data;connecting=false;reconnecting=false;retries=0;
+      S=m.data;recvAt=Date.now();connecting=false;reconnecting=false;retries=0;
       if(sess&&sess.create){sess.create=false}
       if(sess)lsSet('twmj-session',JSON.stringify({room:sess.room,n:sess.n}));
       const u=new URL(location.href);u.searchParams.set('room',sess.room);history.replaceState({},'',u);
@@ -548,6 +551,20 @@ function card(i,me){
   ]);
 }
 
+const cdLeft=()=>Math.max(0,Math.ceil((S.tl-(Date.now()-recvAt))/1000));
+function cdBar(){
+  const e=h('div','cd',null,[h('span',0,'⏱ 剩餘時間 '),h('b',0,cdLeft()+' 秒')]);
+  e.id='cd';if(cdLeft()<=10)e.classList.add('low');
+  return e;
+}
+setInterval(()=>{
+  const e=document.getElementById('cd');
+  if(!e||!S||S.tl<0)return;
+  const n=cdLeft();
+  e.lastChild.textContent=n+' 秒';
+  e.classList.toggle('low',n<=10);
+},250);
+
 let showRules=false;
 function rulesCard(){
   const B=MJ.BASE,P=MJ.PER;
@@ -602,7 +619,7 @@ function table(me){
   main.forEach((t,i)=>hs.push(mk(t,'m'+i)));
   if(last!=null){hs.push(h('span','gap'));hs.push(mk(last,'L'))}
 
-  const st=S.ph==='end'?'本局結束':S.mode==='d'?'輪到 '+S.seats[S.turn].n+' 打牌':S.mode==='bg_c'?'等待搶槓宣告…':'等待宣告：'+(S.wait.length?S.wait.map(i=>S.seats[i].n).join('、'):'…');
+  const st=S.ph==='end'?'本局結束':S.mode==='d'?'輪到 '+S.seats[S.turn].n+' 打牌':'宣告中…';
   const acts=[];
   if(S.ph==='play'&&(S.mode==='c'||S.mode==='bg_c')&&S.wait.includes(me)){
     const q=S.O[me]||{};
@@ -646,6 +663,7 @@ function table(me){
     kids.push(btn('下一局',()=>send('next')));
   }
 
+  if(S.ph==='play'&&S.tl>=0)kids.push(cdBar());
   kids.push(h('div','card',null,[
     h('div','row',null,[
       h('b',0,S.seats[me].n+'（你）'+NM[(me-S.dealer+4)%4]+'家 '+S.sc[me]+'分'),
