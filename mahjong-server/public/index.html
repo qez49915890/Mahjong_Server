@@ -278,7 +278,7 @@ let spriteUrl = '';
 
   // 第 4 列：花牌
   const fls = [['1','春','#15803d','#dc2626'],['2','夏','#15803d','#dc2626'],['3','秋','#15803d','#dc2626'],['4','冬','#15803d','#dc2626'],
-               ['梅','1','#1e3a8a','#dc2626'],['蘭','2','#1e3a8a','#dc2626'],['菊','3','#1e3a8a','#dc2626'],['竹','4','#1e3a8a','#dc2626']];
+               ['梅','1','#1e3a8a','#dc2626'],['蘭','2','#1e3a8a','#dc2626'],['竹','3','#1e3a8a','#dc2626'],['菊','4','#1e3a8a','#dc2626']];
   fls.forEach((f, col) => { drawTileBase(4, col); drawText(4, col, f[0], f[1], f[2], f[3]); });
   drawTileBase(4, 8, true);
 
@@ -482,6 +482,8 @@ function draw0(){
     demoCard,
     nameCard,
     ...(presetCode ? [joinCard, createCard] : [createCard, joinCard]),
+    btn('📖 台數與計分說明',()=>{showRules=!showRules;render()},'g'),
+    ...(showRules?[rulesCard()]:[]),
     atlasPreview,
     h('div','mini',msg||'')
   );
@@ -507,6 +509,8 @@ function lobby(me){
   app.replaceChildren(
     ...[banner()].filter(Boolean),
     h('h1',0,'房間'),
+    btn('📖 台數與計分說明',()=>{showRules=!showRules;render()},'g'),
+    ...(showRules?[rulesCard()]:[]),
     h('div','card',null,[
       h('div','mini','邀請碼（或直接複製下方連結傳給朋友）'),
       h('div','row',null,[h('div','code',S.code), copyBtn])
@@ -541,6 +545,22 @@ function card(i,me){
     titleRow,
     h('div','mini',w+'家 '+S.sc[i]+'分 手牌'+(S.cnt[i]||0)+'張'),
     h('div','hand',null,[...grp(S.mel[i],'sm', i===me),...S.fl[i].map(t=>tz(t,'sm'))])
+  ]);
+}
+
+let showRules=false;
+function rulesCard(){
+  const B=MJ.BASE,P=MJ.PER;
+  return h('div','card',null,[
+    h('b',0,'📖 台數與計分說明'),
+    h('div',0,'得分 = 底 '+B+' + 台 '+P+' x 台數，例如胡 4 台：'+B+' + '+P+' x 4 = '+(B+P*4)+' 分。'),
+    h('div','mini','放槍胡：由放槍的人付。自摸：三家各付。莊家與對手之間，每次多算莊家台（2n + 1，n 為連莊數）。流局莊家連莊，連莊數加 1。'),
+    h('div','mini','尚未實作：七搶一、八仙過海、天聽、地聽、咪幾。'),
+    ...MJ.RULES.flatMap(g=>[
+      h('div',0,'▍'+g.g),
+      ...g.rows.map(r=>h('div','mini',r[0]+'　'+r[1]+(typeof r[1]==='number'?' 台':' 台')+'：'+r[2]))
+    ]),
+    btn('關閉',()=>{showRules=false;render()},'g')
   ]);
 }
 
@@ -604,8 +624,10 @@ function table(me){
     ...[banner()].filter(Boolean),
     h('div','row',null,[
       h('span','mini',(offlineMode?'單機試玩模式':'邀請碼 '+S.code)+' 剩牌 '+S.wl+' '+NM[0]+'圈 連莊 '+S.streak),
+      btn('📖 台數表',()=>{showRules=!showRules;render()},'g'),
       btn('離開',()=>leave(false),'g')
     ]),
+    ...(showRules?[rulesCard()]:[]),
     h('div','opp',null,o.map(i=>card(i,me))),
     h('div','felt',null,[pool(o[1]),pool(o[0]),pool(o[2]),pool(me)]),
     h('div','mini',st)
@@ -616,7 +638,9 @@ function table(me){
     kids.push(h('div','card res',null,r.draw?[h('b',0,'流局，莊家連莊')]:[
       h('b',0,S.seats[r.w].n+(r.zm?' 自摸！':r.extra==='rob'?' 搶槓胡！（'+S.seats[r.f].n+' 被搶槓）':' 胡牌！（'+S.seats[r.f].n+' 放槍）')),
       h('div',0,r.L.join('、')||'無台'),
-      h('div',0,'共 '+r.tai+' 台，每家賠 '+r.a+' 分'),
+      h('div',0,'牌型共 '+r.tai+' 台'+(r.dealer!==undefined?'；莊家台 '+r.dTai+' 台（莊家與對手之間加計）':'')),
+      h('div','mini','底 '+r.base+' + 台 '+r.per+' x 台數'),
+      ...r.pay.map(p=>h('div',0,S.seats[p.i].n+' 付 '+p.amt+' 分（'+p.tai+' 台）')),
       h('div','hand',null,[...grp(S.mel[r.w]||[],'sm',true),...S.fl[r.w].map(t=>tz(t,'sm')),...winHand(r,'sm')])
     ]));
     kids.push(btn('下一局',()=>send('next')));

@@ -15,6 +15,44 @@ function win(a,pg=1,cg=1,pf=()=>1){
   return false;
 }
 
+/* ---------- 計分設定：底 100、台 20（得分 = 底 + 台 x 台數） ---------- */
+const BASE=100, PER=20;
+// 各項台數（想調整某一項，改這裡的數字即可，網頁上的台數表會自動跟著變）
+const T={zimo:1,menqing:1,buqiu:1,banqiu:1,quanqiu:2,dudiao:1,
+  qianggang:1,gangkai:1,haidi:1,hedi:1,
+  flower:1,flowerGang:2,
+  yuan:1,small3:4,big3:8,
+  menfeng:1,quanfeng:1,small4:8,big4:16,
+  hun:4,qing:8,zi:16,
+  an3:2,an4:5,an5:8,pengpeng:4,pinghu:2,
+  tian:24,di:16,ren:16};
+const RULES=[
+  {g:'莊家台',rows:[['莊家',1,'當莊就有，無論胡牌或放槍都要算'],['連莊拉莊','2n','莊家每連莊（胡牌或流局）一次多 2 台，連 n 拉 n，合計莊家台 = 2n + 1']]},
+  {g:'自摸與門前',rows:[['自摸',T.zimo,'自己摸到胡牌，向三家收'],['門清',T.menqing,'完全不吃、不碰、不明槓下胡牌（暗槓可）'],['不求人',T.buqiu,'門清且自摸（門清一摸三 = 門清 + 自摸 + 不求人）'],
+    ['半求人',T.banqiu,'全吃碰（無暗槓）只剩 1 張手牌，自摸'],['全求人',T.quanqiu,'全吃碰（無暗槓）只剩 1 張手牌，放槍胡（再加獨聽共 3 台）']]},
+  {g:'獨聽',rows:[['獨聽',T.dudiao,'只聽 1 種牌：邊張、嵌張（中洞）、單吊。聽 2 種以上（如小螺絲）不算']]},
+  {g:'槓與海底',rows:[['搶槓',T.qianggang,'胡別人加槓的那張牌'],['槓上開花',T.gangkai,'槓牌補牌後自摸（另加自摸 1 台）'],['海底撈月',T.haidi,'自摸最後一張牌'],['河底撈魚',T.hedi,'胡最後一張牌打出來的牌']]},
+  {g:'花牌',rows:[['正花',T.flower,'拿到自己座位的花，每張 1 台（東家 1 梅春、南家 2 蘭夏、西家 3 竹秋、北家 4 菊冬）'],['花槓',T.flowerGang,'湊齊梅蘭竹菊或春夏秋冬任一組']]},
+  {g:'三元與四喜',rows:[['三元刻',T.yuan,'中、發、白每組刻子 1 台'],['小三元',T.small3,'兩組三元刻 + 第三種三元當眼睛（不再加三元刻）'],['大三元',T.big3,'三組三元刻（不再加三元刻）'],
+    ['門風',T.menfeng,'自己座位風的刻子'],['圈風',T.quanfeng,'目前風圈（東風圈）的刻子'],['小四喜',T.small4,'三組風刻 + 第四種風當眼睛（門風、圈風仍可加）'],['大四喜',T.big4,'四組風刻（不再加門風、圈風）']]},
+  {g:'一色與刻子',rows:[['混一色',T.hun,'一種花色加字牌'],['清一色',T.qing,'只有一種花色的數牌'],['字一色',T.zi,'全部是字牌'],
+    ['碰碰胡',T.pengpeng,'全是刻子加一對眼睛，沒有順子'],['三暗刻',T.an3,'3 組暗刻（暗槓也算；放槍胡的那組不算暗刻）'],['四暗刻',T.an4,'4 組暗刻'],['五暗刻',T.an5,'5 組暗刻']]},
+  {g:'胡牌類',rows:[['平胡',T.pinghu,'無字、無花、無刻、非獨聽、非自摸'],['天胡',T.tian,'莊家起手第一張牌就自摸'],['地胡',T.di,'閒家第一巡自摸（無人吃碰）'],['人胡',T.ren,'閒家第一巡、摸牌前就胡別人打的牌（無人吃碰）']]}
+];
+
+// 把 closed 手牌拆成「順子/刻子 + 眼睛」的所有拆法
+function decomps(c){
+  const out=[];
+  const rec=(acc,p)=>{
+    let i=0;while(i<34&&!c[i])i++;
+    if(i>=34){out.push({pair:p,sets:acc.slice()});return}
+    if(c[i]>=3){c[i]-=3;acc.push({k:'t',t:i});rec(acc,p);acc.pop();c[i]+=3}
+    if(i<27&&i%9<7&&c[i+1]&&c[i+2]){c[i]--;c[i+1]--;c[i+2]--;acc.push({k:'s',t:i});rec(acc,p);acc.pop();c[i]++;c[i+1]++;c[i+2]++}
+  };
+  for(let p=0;p<34;p++)if(c[p]>=2){c[p]-=2;rec([],p);c[p]+=2}
+  return out;
+}
+
 function createRoom(code){
   let G={ph:'lobby',seats:[null,null,null,null],sc:[0,0,0,0],dealer:0,streak:0,tk:0,
     hands:[],wall:[],disc:[],mel:[],fl:[],wait:[],opts:{},claims:{}};
@@ -29,21 +67,68 @@ function createRoom(code){
     return G.hands[s].some(x=>x!==n.t)?n.t:-1;
   };
 
-function tally(s,zm,extra){
-  const hd=G.hands[s],ms=G.mel[s],w=(s-G.dealer+4)%4;let tai=0;const L=[],A=(n,x)=>{tai+=x;L.push(n+x+'台')};
+function tally(s,zm,extra,wt){
+  const hd=G.hands[s],ms=G.mel[s],w=(s-G.dealer+4)%4;let tai=0;const L=[];
+  const A=(n,x)=>{if(!x)return;tai+=x;L.push(n+x+'台')};
   const all=[...hd,...ms.flatMap(m=>m.ts)],c=cnt(all);
-  if(s===G.dealer){A('莊家',1);if(G.streak)A('連'+G.streak+'拉'+G.streak,2*G.streak)}
-  if(ms.every(m=>m.k==='ag'))A('門清',1);
-  if(zm)A('自摸',1);
-  if(extra==='gang')A('槓上開花',1);
-  if(extra==='rob')A('搶槓胡',1);
-  G.fl[s].forEach(f=>{if(f%4===w)A('花牌',1)});
-  [31,32,33].forEach(t=>{if(c[t]>=3)A(ZN[t-31],1)});
-  if(c[27+w]>=3)A('門風',1);if(c[27]>=3)A('圈風',1);
+  const noMeld=G.mel.every(m=>!m.length);
+  const open=ms.some(m=>m.k!=='ag');
+  // 門前
+  if(!open)A('門清',T.menqing);
+  if(zm)A('自摸',T.zimo);
+  if(!open&&zm)A('不求人',T.buqiu);
+  if(hd.length===2&&ms.length&&!ms.some(m=>m.k==='ag')){ if(zm)A('半求人',T.banqiu);else A('全求人',T.quanqiu); }
+  // 獨聽：拿掉胡的那張後，只聽 1 種牌
+  const h0=hd.slice();const wi=h0.indexOf(wt);if(wi>=0)h0.splice(wi,1);
+  let waits=0;for(let x=0;x<34;x++)if(win([...h0,x]))waits++;
+  const single=waits===1;
+  if(single)A('獨聽',T.dudiao);
+  // 槓、海底
+  if(extra==='gang')A('槓上開花',T.gangkai);
+  if(extra==='rob')A('搶槓',T.qianggang);
+  if(zm&&!extra&&G.wall.length<=16)A('海底撈月',T.haidi);
+  if(!zm&&extra!=='rob'&&G.wall.length<=16)A('河底撈魚',T.hedi);
+  // 天、地、人胡
+  if(zm&&noMeld&&s===G.dealer&&G.disc.every(d=>!d.length))A('天胡',T.tian);
+  else if(zm&&noMeld&&s!==G.dealer&&!G.disc[s].length)A('地胡',T.di);
+  if(!zm&&noMeld&&s!==G.dealer&&!G.disc[s].length&&extra!=='rob')A('人胡',T.ren);
+  // 花牌（春夏秋冬 34 到 37，梅蘭竹菊 38 到 41，各對應東南西北座位）
+  G.fl[s].forEach(f=>{if((f-34)%4===w)A('正花',T.flower)});
+  const fs=new Set(G.fl[s]);
+  if([34,35,36,37].every(x=>fs.has(x)))A('花槓（春夏秋冬）',T.flowerGang);
+  if([38,39,40,41].every(x=>fs.has(x)))A('花槓（梅蘭竹菊）',T.flowerGang);
+  // 三元
+  const dr=[31,32,33].filter(t=>c[t]>=3),dp=[31,32,33].filter(t=>c[t]===2);
+  if(dr.length===3)A('大三元',T.big3);
+  else if(dr.length===2&&dp.length===1)A('小三元',T.small3);
+  else dr.forEach(t=>A(ZN[t-31]+'刻',T.yuan));
+  // 四喜、門風、圈風
+  const wr=[27,28,29,30].filter(t=>c[t]>=3),wp=[27,28,29,30].filter(t=>c[t]===2);
+  if(wr.length===4)A('大四喜',T.big4);
+  else{
+    if(wr.length===3&&wp.length===1)A('小四喜',T.small4);
+    if(c[27+w]>=3)A('門風',T.menfeng);
+    if(c[27]>=3)A('圈風',T.quanfeng);
+  }
+  // 一色
   const su=new Set(all.filter(t=>t<27).map(t=>t/9|0)),ho=all.some(t=>t>=27);
-  if(!su.size)A('字一色',16);else if(su.size===1)ho?A('混一色',4):A('清一色',8);
-  if(!ms.some(m=>m.k==='chi')&&win(hd,1,0))A('碰碰胡',4);
-  if(ms.every(m=>m.k==='chi')&&!G.fl[s].length&&win(hd,0,1,i=>i<27))A('平胡',2);
+  if(!su.size)A('字一色',T.zi);else if(su.size===1)ho?A('混一色',T.hun):A('清一色',T.qing);
+  // 與拆法有關的台數：暗刻、碰碰胡、平胡（取台數最高的拆法）
+  const noHonor=all.every(t=>t<27);
+  let best=null;
+  for(const d of decomps(cnt(hd))){
+    const it=[];let x=0;
+    const tris=d.sets.filter(e=>e.k==='t');
+    let an=tris.length;if(!zm&&tris.some(e=>e.t===wt))an--;
+    an+=ms.filter(m=>m.k==='ag').length;
+    if(an>=5){it.push(['五暗刻',T.an5]);x+=T.an5}
+    else if(an===4){it.push(['四暗刻',T.an4]);x+=T.an4}
+    else if(an===3){it.push(['三暗刻',T.an3]);x+=T.an3}
+    if(!ms.some(m=>m.k==='chi')&&d.sets.every(e=>e.k==='t')){it.push(['碰碰胡',T.pengpeng]);x+=T.pengpeng}
+    if(!zm&&!single&&noHonor&&!G.fl[s].length&&ms.every(m=>m.k==='chi')&&d.sets.every(e=>e.k==='s')){it.push(['平胡',T.pinghu]);x+=T.pinghu}
+    if(!best||x>best.x)best={x,it};
+  }
+  if(best)best.it.forEach(([n,x])=>A(n,x));
   return{tai,L};
 }
 
@@ -413,10 +498,16 @@ function fin(w,zm,extra){
       G.hands[w].push(G.last.t);
       if(extra!=='rob') G.disc[f].pop();
     }else wt=G.hands[w][G.hands[w].length-1];
-    const r=tally(w,zm,extra),a=3+r.tai;
-    if(zm){for(let i=0;i<4;i++)if(i!==w){G.sc[i]-=a;G.sc[w]+=a}}
-    else{G.sc[f]-=a;G.sc[w]+=a}
-    G.res={w,zm,f,tai:r.tai,L:r.L,a,extra,wt};
+    const r=tally(w,zm,extra,wt);
+    const dTai=1+2*G.streak;   // 莊家台 = 2n + 1（只在莊家與對手之間計算）
+    const payers=zm?[0,1,2,3].filter(i=>i!==w):[f];
+    const pay=payers.map(i=>{
+      const t=r.tai+((w===G.dealer||i===G.dealer)?dTai:0);
+      return{i,tai:t,amt:BASE+PER*t};
+    });
+    pay.forEach(p=>{G.sc[p.i]-=p.amt;G.sc[w]+=p.amt});
+    const a=pay.reduce((x,p)=>x+p.amt,0);
+    G.res={w,zm,f,tai:r.tai,L:r.L,a,extra,wt,pay,dTai,base:BASE,per:PER,dealer:G.dealer};
   }
   bc();
 }
@@ -429,7 +520,7 @@ function act(s,d){
     return;
   }
   if(G.ph==='end'&&a==='next'){
-    if(G.res.draw);
+    if(G.res.draw)G.streak++;
     else if(G.res.w===G.dealer)G.streak++;
     else{G.dealer=(G.dealer+1)%4;G.streak=0}
     newRound();
@@ -500,7 +591,7 @@ room.destroy=()=>{destroyed=true;G.ph='dead';G.tk++;clearTimeout(timer)};
 return room;
 }
 
-const api={createRoom,win,cnt};
+const api={createRoom,win,cnt,RULES,BASE,PER};
 if(typeof module!=='undefined'&&module.exports)module.exports=api;
 root.MJ=api;
 })(typeof window!=='undefined'?window:globalThis);
